@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mapa turystyczna Polski</title>
+<meta name="description" content="Miejsca warte odwiedzin w Polsce, oceniane gwiazdkami w stylu przewodników Touring Club Italiano.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Polska ★">
+<meta name="theme-color" content="#9e1b22">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="miejsca.js?v=dac78d4a"></script>
+<script src="zdjecia.js?v=6675f0b9" defer></script>
+<style>
+/* Układ: mapa na cały ekran; pływający pasek wyszukiwania u góry, przyciski w prawym dolnym rogu,
+   arkusz (szczegóły / lista / filtry) wysuwany od dołu na telefonie, panel boczny na szerokim ekranie. */
+:root {
+  --red: #9e1b22;        /* czerwień okładki Guida Rossa */
+  --red-soft: #f6e3e3;
+  --ink: #1d1b1a;
+  --muted: #6b6560;
+  --line: #e4dfdb;
+  --panel: #ffffff;
+  --panel-2: #f6f4f2;
+  --shadow: 0 6px 24px rgba(30, 20, 15, .18);
+  --done: #15803d;
+  --done-soft: #e7f5ec;
+  --warn: #8a5a00;
+  --warn-soft: #fbf1dc;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --red: #e0575c; --red-soft: #3a2223; --ink: #f1ece8; --muted: #a59d97; --line: #3a3532;
+    --panel: #1f1c1b; --panel-2: #2a2624; --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+    --done: #4ade80; --done-soft: #16321f; --warn: #f2b84b; --warn-soft: #3a2c12;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { font: 15px/1.45 var(--sans); color: var(--ink); background: var(--panel-2); -webkit-text-size-adjust: 100%; }
+button, input { font: inherit; color: inherit; }
+button { touch-action: manipulation; cursor: pointer; }
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+#map { position: fixed; inset: 0; background: #e8e4dc; }
+
+/* Pasek wyszukiwania */
+.topbar {
+  position: fixed; z-index: 1000; left: 0; right: 0; top: 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+  pointer-events: none; display: flex; gap: 8px;
+}
+.search {
+  pointer-events: auto; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border-radius: 12px; box-shadow: var(--shadow); padding: 0 6px 0 12px; height: 46px;
+}
+.search .mark { color: var(--red); font: 700 17px/1 var(--serif); letter-spacing: -.5px; white-space: nowrap; }
+.search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 16px; height: 100%; }
+.iconbtn {
+  pointer-events: auto; width: 46px; height: 46px; border: 0; border-radius: 12px; background: var(--panel);
+  box-shadow: var(--shadow); display: grid; place-items: center; position: relative;
+}
+.iconbtn svg { width: 22px; height: 22px; stroke: var(--ink); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.iconbtn.on svg { stroke: var(--red); }
+.iconbtn .badge { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+.search .clear { border: 0; background: transparent; width: 34px; height: 34px; color: var(--muted); font-size: 20px; }
+
+/* Przyciski boczne */
+.fab {
+  position: fixed; z-index: 1000; display: flex; flex-direction: column; gap: 10px;
+  right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+}
+.hint {
+  position: fixed; z-index: 999; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+  background: rgba(29, 27, 26, .82); color: #fff; font-size: 13px; padding: 7px 12px; border-radius: 20px;
+  max-width: calc(100% - 140px); text-align: center; pointer-events: none;
+}
+
+/* Arkusz */
+.sheet {
+  position: fixed; z-index: 1100; left: 0; right: 0; bottom: 0; max-height: 62%;
+  background: var(--panel); border-radius: 16px 16px 0 0; box-shadow: 0 -6px 30px rgba(0, 0, 0, .2);
+  display: flex; flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.sheet.tall { max-height: 85%; }
+.sheet-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px max(16px, env(safe-area-inset-right, 0px)) 6px max(16px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid var(--line); position: relative;
+}
+.sheet-head::before { content: ""; position: absolute; top: 5px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
+.sheet-head h2 { flex: 1; margin: 12px 0 4px; font: 600 13px/1.2 var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.sheet-head .x { border: 0; background: var(--panel-2); width: 34px; height: 34px; border-radius: 50%; font-size: 18px; line-height: 1; margin-top: 6px; }
+.sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px)); }
+@media (min-width: 820px) {
+  .sheet, .sheet.tall { left: 12px; right: auto; top: 68px; bottom: 12px; width: 390px; max-height: none; border-radius: 14px; }
+  .hint { left: calc(50% + 200px); }
+}
+
+/* Szczegóły miejsca */
+.meta { color: var(--muted); font-size: 13px; }
+.dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; flex: none; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .15); }
+.meta .dot { vertical-align: -1px; margin-right: 6px; }
+.pname { font: 700 24px/1.15 var(--serif); margin: 6px 0 4px; text-wrap: balance; }
+.rating { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
+.st { color: var(--red); letter-spacing: 1px; font-size: 17px; }
+.rating .lab { font-weight: 600; }
+.rating i { color: var(--muted); font-size: 13px; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); }
+.chip.unesco { background: #e6eefb; border-color: #c4d4f2; color: #1b4a9a; }
+.chip.ph { background: var(--red-soft); border-color: transparent; color: var(--red); }
+.chip.kgp { background: var(--done-soft); border-color: transparent; color: var(--done); }
+.chip.closed { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+.closednote { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--ink); font-size: 14px; max-width: 65ch; }
+.closednote b { color: var(--warn); }
+@media (prefers-color-scheme: dark) { .chip.unesco { background: #1d2a40; border-color: #2d4166; color: #9dbbf0; } }
+.desc { margin: 0 0 14px; font-size: 15.5px; max-width: 65ch; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+.btn {
+  display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 10px; border-radius: 10px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink); text-decoration: none; font-weight: 600; font-size: 14px; text-align: center;
+}
+.btn.primary { grid-column: 1 / -1; background: var(--red); border-color: var(--red); color: #fff; }
+h3.sub { font: 600 12px/1.2 var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 6px 0 6px; }
+
+/* Listy */
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { border-bottom: 1px solid var(--line); }
+.list button { width: 100%; text-align: left; border: 0; background: transparent; display: flex; gap: 10px; align-items: center; padding: 10px 0; min-height: 48px; }
+.list .t { flex: 1; min-width: 0; }
+.list .n { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .s { color: var(--muted); font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .r { color: var(--red); font-size: 13px; letter-spacing: .5px; white-space: nowrap; }
+.list .km { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.note { color: var(--muted); font-size: 13px; margin: 8px 0; }
+
+/* Filtry */
+.fgroup { margin-bottom: 18px; }
+.toggles { display: flex; flex-direction: column; gap: 2px; }
+.tg { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 2px; border-bottom: 1px solid var(--line); }
+.tg input { width: 20px; height: 20px; accent-color: var(--red); flex: none; }
+.tg .l { flex: 1; }
+.tg .c { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.tg .st { font-size: 15px; min-width: 54px; display: inline-block; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row .btn { flex: 1; }
+
+/* Odwiedzone */
+.vck { color: var(--done); font-style: normal; font-weight: 700; margin-right: 4px; }
+.lbl .vck { color: #15803d; }
+.vbtn {
+  width: 100%; min-height: 46px; margin: 0 0 12px; border-radius: 10px; font-weight: 600; font-size: 15px;
+  background: transparent; color: var(--ink); border: 1.5px dashed var(--muted);
+}
+.vbtn.on { border: 1.5px solid var(--done); background: var(--done-soft); color: var(--done); }
+.prog { margin: 0 0 10px; font-variant-numeric: tabular-nums; }
+.prog .st { font-size: 14px; letter-spacing: 0; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.seg label { position: relative; min-width: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: flex; align-items: center; justify-content: center; min-height: 38px; padding: 0 4px; border-radius: 7px; font-weight: 600; font-size: 13.5px; text-align: center; cursor: pointer; }
+.seg input:checked + span { background: var(--panel); color: var(--red); box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
+.seg input:focus-visible + span { outline: 2px solid var(--red); }
+.backup { margin-top: 10px; }
+.importbox { display: grid; gap: 8px; margin-top: 8px; }
+.importbox textarea { width: 100%; font: 13px/1.4 ui-monospace, Menlo, monospace; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+
+/* Etykiety na mapie */
+.lbl { white-space: nowrap; font: 600 12px/1.15 var(--sans); color: #1d1b1a; text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff; cursor: pointer; }
+.lbl b { color: #9e1b22; font-weight: 700; letter-spacing: .5px; margin-left: 2px; }
+.lbl.s3 { font: 700 14px/1.15 var(--serif); }
+.lbl.s2 { font-size: 12.5px; }
+.lbl.s0 { font-weight: 500; color: #3c3936; }
+.lbl.closed { color: #6b6560; font-style: italic; }
+.lbl .cz { font-size: 10.5px; font-weight: 600; color: #8a5a00; margin-left: 4px; }
+.leaflet-container { font-family: var(--sans); }
+.leaflet-control-layers { border-radius: 12px !important; border: 0 !important; box-shadow: var(--shadow) !important; }
+.leaflet-top.leaflet-right { top: calc(env(safe-area-inset-top, 0px) + 62px); }
+.leaflet-control-attribution { font-size: 10px; }
+.toast {
+  position: fixed; z-index: 1200; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 66px);
+  background: var(--ink); color: var(--panel); padding: 9px 14px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px);
+}
+.info p { margin: 0 0 10px; max-width: 65ch; }
+
+/* Zdjęcia */
+.photos { margin: 2px 0 12px; }
+.strip { display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.strip::-webkit-scrollbar { display: none; }
+.strip .ph { position: relative; flex: none; padding: 0; border: 0; border-radius: 8px; overflow: hidden; scroll-snap-align: start; background: var(--panel-2); cursor: zoom-in; }
+.ph .yr { position: absolute; left: 6px; bottom: 6px; padding: 1px 5px; border-radius: 4px; font-size: 11px; line-height: 1.4; background: rgba(0,0,0,.62); color: #fff; }
+.ph .yr.old { background: var(--warn); }
+.more { margin: -6px 0 12px; font-size: 12.5px; color: var(--muted); }
+.more a { color: var(--red); }
+.strip img { display: block; height: 132px; width: auto; max-width: none; }
+.ph-skel { flex: none; width: 176px; height: 132px; border-radius: 8px; background: var(--panel-2); }
+.phsrc { margin: 5px 0 0; font-size: 11.5px; color: var(--muted); }
+
+/* Warto zobaczyć */
+.hl { margin: 0 0 16px; padding: 0 0 0 18px; max-width: 65ch; }
+.hl li { margin: 0 0 5px; font-size: 14.5px; }
+.hl li::marker { color: var(--muted); }
+.hl li.top { list-style: none; margin-left: -18px; }
+.hl li.top .st { font-size: 14px; letter-spacing: 0; margin-right: 2px; }
+.lightbox { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center; justify-content: center; background: rgba(12, 10, 9, .95); }
+.lightbox img { max-width: 100%; max-height: calc(100% - 120px); object-fit: contain; }
+.lb-x { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 10px); right: max(12px, env(safe-area-inset-right, 0px)); width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .16); color: #fff; font-size: 24px; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, .12); color: #fff; font-size: 30px; }
+.lb-nav.prev { left: max(8px, env(safe-area-inset-left, 0px)); }
+.lb-nav.next { right: max(8px, env(safe-area-inset-right, 0px)); }
+.lb-cap { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); margin: 0; padding: 0 16px; text-align: center; color: #e8e2dc; font-size: 12.5px; }
+.lb-cap a { color: #fff; }
+.scale { width: 100%; border-collapse: collapse; margin: 6px 0 14px; font-size: 14px; }
+.scale td { padding: 7px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.scale td:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Mapa"></div>
+
+<div class="topbar">
+  <label class="search">
+    <span class="mark" aria-hidden="true">PL★</span>
+    <input id="q" type="search" placeholder="Szukaj miejsca lub miejscowości" autocomplete="off" enterkeyhint="search" aria-label="Szukaj">
+    <button class="clear" id="qclear" type="button" aria-label="Wyczyść" hidden>×</button>
+  </label>
+  <button class="iconbtn" id="bFilter" type="button" aria-label="Filtry">
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span class="badge" id="fBadge" hidden></span>
+  </button>
+</div>
+
+<div class="fab">
+  <button class="iconbtn" id="bInfo" type="button" aria-label="Legenda i informacje">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
+  </button>
+  <button class="iconbtn" id="bList" type="button" aria-label="Lista miejsc na ekranie">
+    <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.5M4.5 12h.5M4.5 18h.5"/></svg>
+  </button>
+  <button class="iconbtn" id="bLocate" type="button" aria-label="Gdzie jestem">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5"/></svg>
+  </button>
+</div>
+
+<div class="hint" id="hint" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Zdjęcie">
+  <img id="lbImg" alt="">
+  <button class="lb-nav prev" id="lbPrev" type="button" aria-label="Poprzednie zdjęcie">‹</button>
+  <button class="lb-nav next" id="lbNext" type="button" aria-label="Następne zdjęcie">›</button>
+  <button class="lb-x" id="lbClose" type="button" aria-label="Zamknij">×</button>
+  <p class="lb-cap" id="lbCap"></p>
+</div>
+
+<section class="sheet" id="sheet" hidden aria-live="polite">
+  <div class="sheet-head"><h2 id="sheetTitle"></h2><button class="x" id="sheetClose" type="button" aria-label="Zamknij">×</button></div>
+  <div class="sheet-body" id="sheetBody"></div>
+</section>
+
+<script>
+"use strict";
+const CATS = {
+  miasto:       { n: "Miasta i miejscowości", c: "#b3261e" },
+  zamek:        { n: "Zamki i fortyfikacje",  c: "#795548" },
+  rezydencja:   { n: "Pałace, dwory, ogrody", c: "#8e24aa" },
+  sakralne:     { n: "Kościoły i klasztory",  c: "#1e5aa8" },
+  muzeum:       { n: "Muzea i galerie",       c: "#e07b00" },
+  architektura: { n: "Architektura",          c: "#00838f" },
+  technika:     { n: "Zabytki techniki",      c: "#7a6a00" },
+  skansen:      { n: "Skanseny i budownictwo ludowe", c: "#c2185b" },
+  pamiec:       { n: "Miejsca pamięci",       c: "#455a64" },
+  przyroda:     { n: "Przyroda",              c: "#2e7d32" }
+};
+// Skala Touring Club Italiano
+const STARS = [
+  { n: "godne uwagi",          it: "segnalato" },
+  { n: "interesujące",         it: "di notevole interesse" },
+  { n: "bardzo interesujące",  it: "di grande interesse" },
+  { n: "wyjątkowe",            it: "eccezionale" }
+];
+const MINZOOM = [9, 7, 0, 0];      // od jakiego zoomu widać punkt danej klasy
+const LABELZOOM = [12, 10, 8, 5];  // od jakiego zoomu widać jego podpis
+const RADIUS = [4, 5.5, 7.5, 10];
+const POLAND = [[49.0, 14.1], [54.85, 24.15]];
+
+const W = MIEJSCA.woj;
+const norm = s => s.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[̀-ͯ]/g, "");
+const P = MIEJSCA.p.map((a, i) => ({
+  i, name: a[0], s: a[1], cat: a[2], town: a[3], woj: W[a[4]], desc: a[5], lat: a[6], lon: a[7],
+  wiki: a[8] || null, unesco: !!(a[9] & 1), ph: !!(a[9] & 2), kgp: !!(a[9] & 4), closed: a[10] || null, hl: a[11] || null, zm: a[12] || 0,
+  key: norm(a[0] + " " + a[3])
+}));
+const byStarsAsc = [...P].sort((a, b) => a.s - b.s);
+const stars = n => "★".repeat(n);
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- stan (filtry i widok zapamiętane w przeglądarce) ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+const DEFAULT_F = { s: [true, true, true, true], cats: Object.keys(CATS), unesco: false, ph: false, kgp: false, hideClosed: false, v: "all" };
+let F = Object.assign({}, DEFAULT_F, store.get("mtp-f", {}));
+
+// Odwiedzone: { identyfikator miejsca: data "RRRR-MM-DD" }; identyfikator nie zależy od kolejności danych
+const VKEY = "mtp-visited";
+let V = store.get(VKEY, {});
+P.forEach(p => p.id = p.wiki || p.name + "|" + p.town);
+const isV = p => !!V[p.id];
+const fmtDate = d => d.split("-").reverse().join(".");
+
+const pass = p => F.s[p.s] && F.cats.includes(p.cat) && (!F.unesco || p.unesco) && (!F.ph || p.ph) && (!F.kgp || p.kgp) &&
+  (!F.hideClosed || !p.closed) &&
+  (F.v === "all" || (F.v === "yes") === isV(p));
+
+// ---------- mapa ----------
+const map = L.map("map", { zoomControl: false, zoomSnap: 0.5, minZoom: 5, maxZoom: 18, maxBounds: [[46.5, 9], [57.5, 29]] });
+const base = {
+  "Mapa": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }),
+  "Teren": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+    maxZoom: 17, subdomains: "abc",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
+  })
+};
+const baseName = store.get("mtp-base", "Mapa");
+(base[baseName] || base["Mapa"]).addTo(map);
+L.control.layers(base, null, { position: "topright" }).addTo(map);
+map.on("baselayerchange", e => store.set("mtp-base", e.name));
+if (matchMedia("(hover: hover)").matches) L.control.zoom({ position: "bottomleft" }).addTo(map);
+map.attributionControl.setPrefix(false);
+
+const view = store.get("mtp-view", null);
+if (view) map.setView(view.c, view.z); else map.fitBounds(POLAND);
+
+const renderer = L.canvas({ padding: 0.4, tolerance: 9 });
+const dots = L.layerGroup().addTo(map);
+const labels = L.layerGroup().addTo(map);
+let selRing = null;
+
+// Obrys: zielony = odwiedzone; przerywany szary = czasowo nieczynne
+const ring = p => isV(p) ? { color: "#15803d", weight: 3.5 }
+  : p.closed ? { color: "#4b4643", weight: 2 }
+  : { color: p.s === 3 ? "#5a0f13" : "#ffffff", weight: p.s === 3 ? 2.5 : 1.5 };
+
+function marker(p) {
+  if (!p.m) {
+    p.m = L.circleMarker([p.lat, p.lon], Object.assign({
+      renderer, radius: RADIUS[p.s], fillColor: CATS[p.cat].c, fillOpacity: p.closed ? 0.4 : 1,
+      dashArray: p.closed ? "3 2" : null, bubblingMouseEvents: false
+    }, ring(p))).on("click", () => openPlace(p));
+  }
+  return p.m;
+}
+
+const radius = (s, z) => RADIUS[s] * (z < 7 ? 0.7 : 1);
+// Przy wąskim filtrze (UNESCO, Pomniki Historii, Korona Gór, odwiedzone) pokazuj wszystkie pasujące niezależnie od przybliżenia
+const narrow = () => F.unesco || F.ph || F.kgp || F.v !== "all";
+const minZ = p => narrow() ? 0 : MINZOOM[p.s];
+const labZ = p => narrow() ? 5 : LABELZOOM[p.s];
+
+function render() {
+  const z = map.getZoom(), b = map.getBounds().pad(0.6);  // rysujemy tylko widoczny obszar z zapasem
+  dots.clearLayers();
+  let hidden = 0;
+  for (const p of byStarsAsc) {
+    if (!pass(p)) continue;
+    if (z < minZ(p)) { hidden++; continue; }
+    if (b.contains([p.lat, p.lon])) dots.addLayer(marker(p).setRadius(radius(p.s, z)));
+  }
+  renderLabels();
+  const h = document.getElementById("hint");
+  h.hidden = hidden === 0;
+  h.textContent = `Przybliż, aby zobaczyć ${hidden} ${plural(hidden, "kolejne miejsce", "kolejne miejsca", "kolejnych miejsc")}`;
+}
+
+// Podpisy: od najwyżej ocenianych, z pominięciem nakładających się
+function renderLabels() {
+  labels.clearLayers();
+  const z = map.getZoom(), b = map.getBounds().pad(0.1), boxes = [];
+  // przy dużym przybliżeniu podpisy obiektów mają pierwszeństwo przed podpisem samego miasta
+  const rank = p => p.s - (z >= 13 && p.cat === "miasto" ? 2.5 : 0);
+  const cand = P.filter(p => pass(p) && z >= minZ(p) && z >= labZ(p) && b.contains([p.lat, p.lon]))
+    .sort((a, b) => rank(b) - rank(a));
+  for (const p of cand) {
+    const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+    const fs = p.s === 3 ? 7.9 : 6.7;
+    const w = p.name.length * fs + p.s * 9 + 6 + (p.closed ? 62 : 0), h = p.s === 3 ? 17 : 15, r = radius(p.s, z), x = pt.x + r + 3, y = pt.y - h / 2;
+    if (boxes.some(o => x < o.x + o.w && x + w > o.x && y < o.y + o.h && y + h > o.y)) continue;
+    boxes.push({ x, y, w, h });
+    if (boxes.length > 140) break;
+    const html = (isV(p) ? '<i class="vck">✓</i>' : "") + esc(p.name) + (p.s ? `<b>${stars(p.s)}</b>` : "") +
+      (p.closed ? '<em class="cz">nieczynne</em>' : "");
+    L.marker([p.lat, p.lon], {
+      icon: L.divIcon({ className: "lbl s" + p.s + (p.closed ? " closed" : ""), html, iconSize: null, iconAnchor: [-(r + 3), h / 2] }),
+      keyboard: false
+    }).on("click", () => openPlace(p)).addTo(labels);
+  }
+}
+
+map.on("moveend", () => { render(); store.set("mtp-view", { c: map.getCenter(), z: map.getZoom() }); });
+map.on("click", closeSheet);
+
+// ---------- arkusz ----------
+const sheet = document.getElementById("sheet"), sheetBody = document.getElementById("sheetBody"),
+  sheetTitle = document.getElementById("sheetTitle");
+let sheetMode = null;
+function openSheet(mode, title, html, tall) {
+  sheetMode = mode;
+  sheetTitle.textContent = title;
+  sheetBody.innerHTML = html;
+  sheet.classList.toggle("tall", !!tall);
+  sheet.hidden = false;
+  sheetBody.scrollTop = 0;
+  document.getElementById("hint").style.visibility = "hidden";
+}
+function closeSheet() {
+  sheet.hidden = true; sheetMode = null;
+  if (selRing) { map.removeLayer(selRing); selRing = null; }
+  document.getElementById("hint").style.visibility = "";
+}
+document.getElementById("sheetClose").onclick = closeSheet;
+
+function plural(n, one, few, many) {
+  if (n === 1) return one;
+  const d = n % 10, t = n % 100;
+  return d >= 2 && d <= 4 && (t < 12 || t > 14) ? few : many;
+}
+function km(a, b) {
+  const R = 6371, r = Math.PI / 180, dl = (b.lat - a.lat) * r, dn = (b.lon - a.lon) * r;
+  const x = Math.sin(dl / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dn / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+const fmtKm = d => d < 1 ? Math.round(d * 1000) + " m" : (d < 10 ? d.toFixed(1).replace(".", ",") : Math.round(d)) + " km";
+
+function rows(list, distFrom) {
+  return `<ul class="list">${list.map(p => `<li><button type="button" data-i="${p.i}">
+    <span class="dot" style="background:${CATS[p.cat].c}"></span>
+    <span class="t"><span class="n">${isV(p) ? '<i class="vck">✓</i>' : ""}${esc(p.name)}</span><span class="s">${esc(p.town)} · ${esc(CATS[p.cat].n)}${p.closed ? " · nieczynne" : ""}</span></span>
+    <span class="r">${stars(p.s)}</span>
+    ${distFrom ? `<span class="km">${fmtKm(km(distFrom, p))}</span>` : ""}
+  </button></li>`).join("")}</ul>`;
+}
+sheetBody.addEventListener("click", e => {
+  const b = e.target.closest("button[data-i]");
+  if (b) openPlace(P[+b.dataset.i], true);
+});
+
+function openPlace(p, fly) {
+  const near = P.filter(o => o !== p).map(o => ({ o, d: km(p, o) })).filter(x => x.d < 30)
+    .sort((a, b) => a.d - b.d).slice(0, 8).map(x => x.o);
+  const apple = `https://maps.apple.com/?daddr=${p.lat},${p.lon}&q=${encodeURIComponent(p.name)}`;
+  const google = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`;
+  const html = `
+    <div class="meta"><span class="dot" style="background:${CATS[p.cat].c}"></span>${esc(CATS[p.cat].n)} · ${esc(p.town)} · woj. ${esc(p.woj)}</div>
+    <h1 class="pname">${esc(p.name)}</h1>
+    <div class="rating">${p.s ? `<span class="st">${stars(p.s)}</span>` : ""}<span class="lab">${STARS[p.s].n}</span><i>${STARS[p.s].it}</i></div>
+    ${p.unesco || p.ph || p.kgp || p.closed ? `<div class="badges">${p.closed ? '<span class="chip closed">Czasowo nieczynne</span>' : ""}${p.unesco ? '<span class="chip unesco">UNESCO</span>' : ""}${p.ph ? '<span class="chip ph">Pomnik Historii</span>' : ""}${p.kgp ? '<span class="chip kgp">Korona Gór Polski</span>' : ""}</div>` : ""}
+    ${p.wiki ? '<div class="photos" id="photos" aria-busy="true"><div class="strip"><span class="ph-skel"></span><span class="ph-skel"></span><span class="ph-skel"></span></div></div>' : ""}
+    <p class="more">Nowsze zdjęcia: <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name.includes(p.town) ? p.name : p.name + ", " + p.town)}" target="_blank" rel="noopener">Google Maps</a> · <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p.lat},${p.lon}" target="_blank" rel="noopener">Widok z ulicy</a></p>
+    ${p.closed ? `<p class="closednote"><b>Przed wizytą sprawdź:</b> ${esc(p.closed)}</p>` : ""}
+    <p class="desc">${esc(p.desc)}</p>
+    ${p.hl ? `<h3 class="sub">Warto zobaczyć</h3><ul class="hl">${p.hl.map(h => h.startsWith("★ ")
+      ? `<li class="top"><span class="st" aria-label="wyjątkowe">★</span> ${esc(h.slice(2))}</li>` : `<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+    ${vBtn(p)}
+    <div class="actions">
+      <a class="btn primary" href="${apple}" target="_blank" rel="noopener">Prowadź – Mapy Apple</a>
+      <a class="btn" href="${google}" target="_blank" rel="noopener">Google Maps</a>
+      ${p.wiki ? `<a class="btn" href="https://pl.m.wikipedia.org/wiki/${encodeURIComponent(p.wiki.replace(/ /g, "_"))}" target="_blank" rel="noopener">Wikipedia</a>` : ""}
+    </div>
+    ${near.length ? `<h3 class="sub">W promieniu 30 km</h3>${rows(near, p)}` : ""}`;
+  openSheet("place", "Miejsce", html);
+  curPlace = p;
+  if (p.wiki) showPhotos(p);
+  if (selRing) map.removeLayer(selRing);
+  selRing = L.circleMarker([p.lat, p.lon], { radius: RADIUS[p.s] + 5, color: "#9e1b22", weight: 3, fill: false, interactive: false }).addTo(map);
+  if (fly) {
+    const z = Math.max(map.getZoom(), p.cat === "miasto" || p.cat === "przyroda" ? 12 : 15);
+    map.flyTo(offsetForSheet([p.lat, p.lon], z), z, { duration: 0.6 });
+  } else {
+    // punkt ma być widoczny nad arkuszem (telefon) lub obok panelu (szeroki ekran)
+    const pt = map.latLngToContainerPoint([p.lat, p.lon]), wide = innerWidth >= 820;
+    const ok = pt.y > 70 && pt.y < (wide ? innerHeight - 40 : innerHeight * 0.36) && pt.x > (wide ? 420 : 20) && pt.x < innerWidth - 20;
+    if (!ok) map.panTo(offsetForSheet([p.lat, p.lon], map.getZoom()));
+  }
+}
+// Przesuń środek tak, by punkt nie chował się pod arkuszem na telefonie
+function offsetForSheet(ll, z) {
+  const shift = innerWidth >= 820 ? [-200, 0] : [0, innerHeight * 0.3];
+  return map.unproject(map.project(ll, z).add(shift), z);
+}
+
+// ---------- zdjęcia z Wikimedia Commons przypisane do miejsca ----------
+// Źródła, w kolejności: zdjęcie główne artykułu pl.wiki, pliki Commons oznaczone jako przedstawiające
+// ten obiekt (P180 „przedstawia” = element Wikidata artykułu), a gdy to za mało – kategoria Commons obiektu.
+// Nie bierzemy wszystkich obrazów z artykułu: szablony nawigacyjne wstawiają tam zdjęcia innych miejsc.
+const API = b => `https://${b}/w/api.php?origin=*&format=json&formatversion=2&`;
+const WIKI = API("pl.wikipedia.org"), COMMONS = API("commons.wikimedia.org"), WDATA = API("www.wikidata.org");
+const IIP = { prop: "imageinfo", iiprop: "url|size|mime|extmetadata|timestamp", iiurlwidth: 500, iiextmetadatafilter: "Artist|LicenseShortName|DateTimeOriginal" };
+const NOT_PHOTO = /herb|flag|coat.of.arms|\bmap|mapa|locator|location|lokaliz|logo|icon|ikona|podpis|signature|\bplan\b|plan_|schemat|diagram|pieczęć|seal|rysunek|tablica informacyjna/i;
+const OLD_PIC = /\b1[5-9]\d\d\b|\bLOC\b|photochrom|ansicht|stich|lithogr|rycin|postcard|pocztówk|archiw|grafik/i;
+const photoCache = new Map();
+let curPlace = null, gallery = [];
+const plain = html => { const d = document.createElement("div"); d.innerHTML = html || ""; return d.textContent.trim(); };
+const bucket = ii => ii.width >= 1280 ? 1280 : ii.width >= 960 ? 960 : 500;
+const pagesOf = r => (r?.query?.pages || []).filter(pg => pg.imageinfo).sort((a, b) => (a.index || 0) - (b.index || 0));
+const isPhoto = pg => { const ii = pg.imageinfo[0];
+  return /jpeg|webp/.test(ii.mime) && ii.width >= 500 && ii.thumburl && !NOT_PHOTO.test(pg.title); };
+
+// rok wykonania zdjęcia (z metadanych pliku), a gdy go brak – rok przesłania na Commons
+const photoYear = ii => +((plain(ii.extmetadata?.DateTimeOriginal?.value).match(/\b(18[5-9]\d|19\d\d|20[0-2]\d)\b/) ||
+  (ii.timestamp || "").match(/^(\d{4})/) || [])[1]) || null;
+const toPhoto = pg => { const ii = pg.imageinfo[0];
+  return { src: ii.thumburl, big: ii.thumburl.replace("/500px-", `/${bucket(ii)}px-`), w: ii.thumbwidth, h: ii.thumbheight, y: photoYear(ii),
+    page: ii.descriptionurl, author: plain(ii.extmetadata?.Artist?.value), lic: ii.extmetadata?.LicenseShortName?.value || "" }; };
+
+function loadPhotos(p) {
+  if (!photoCache.has(p.id)) photoCache.set(p.id, (async () => {
+    const get = (base, o) => fetch(base + new URLSearchParams(o)).then(r => r.ok ? r.json() : Promise.reject(r.status));
+    // sprawdzony wybór zdjęć (zdjecia.js): lista = te pliki w tej kolejności (pusta = brak trafnych zdjęć);
+    // obiekt {bez: [...]} = zwykły dobór, ale bez wskazanych plików (błędny obiekt albo nieaktualny stan)
+    const pick = window.ZDJECIA?.[p.id], bez = new Set(Array.isArray(pick) ? [] : (pick?.bez || []).map(f => "File:" + f));
+    if (Array.isArray(pick)) {
+      if (!pick.length) return [];
+      const by = new Map(pagesOf(await get(COMMONS, { action: "query", titles: pick.map(f => "File:" + f).join("|"), ...IIP }))
+        .map(pg => [pg.title, pg]));
+      return pick.map(f => by.get("File:" + f)).filter(pg => pg && pg.imageinfo[0].thumburl).map(toPhoto);
+    }
+    const page = (await get(WIKI, { action: "query", titles: p.wiki, redirects: 1, prop: "pageprops|pageimages",
+      ppprop: "wikibase_item", piprop: "name" })).query?.pages?.[0] || {};
+    const qid = page.pageprops?.wikibase_item, lead = page.pageimage;
+    const [leadRes, depicts, cat] = await Promise.all([
+      lead ? get(COMMONS, { action: "query", titles: "File:" + lead, ...IIP }) : null,
+      qid ? get(COMMONS, { action: "query", generator: "search", gsrsearch: "haswbstatement:P180=" + qid, gsrnamespace: 6, gsrlimit: 15, ...IIP }) : null,
+      qid ? get(WDATA, { action: "wbgetclaims", entity: qid, property: "P373" }).then(r => r.claims?.P373?.[0]?.mainsnak?.datavalue?.value, () => null) : null
+    ]);
+    const catRes = cat ? await get(COMMONS, { action: "query", generator: "categorymembers",
+      gcmtitle: "Category:" + cat, gcmtype: "file", gcmlimit: 30, ...IIP }).catch(() => null) : null;
+    // ranking: zdjęcie główne artykułu > „przedstawia” (P180) > kategoria obiektu; nowsze wyżej; zdjęcia sprzed
+    // zmiany obiektu (p.zm: rok remontu, odbudowy, pożaru…) na końcu; archiwalne (przed 1990) pomijamy
+    const cands = new Map();
+    const add = (pg, w) => { if (!isPhoto(pg) || OLD_PIC.test(pg.title) || bez.has(pg.title)) return;
+      const y = photoYear(pg.imageinfo[0]); if (y && y < 1990) return;
+      const c = cands.get(pg.title) || { pg, y, w: 0 }; c.w += w; cands.set(pg.title, c); };
+    pagesOf(leadRes).forEach(pg => add(pg, 3)); pagesOf(depicts).forEach(pg => add(pg, 2)); pagesOf(catRes).forEach(pg => add(pg, 1));
+    const score = c => c.w + (c.y >= 2018 ? 2 : c.y >= 2012 ? 1 : c.y && c.y < 2005 ? -2 : 0) - (p.zm && c.y && c.y < p.zm ? 6 : 0);
+    return [...cands.values()].sort((a, b) => score(b) - score(a) || (b.y || 0) - (a.y || 0)).slice(0, 5)
+      .map(c => ({ ...toPhoto(c.pg), stale: !!(p.zm && c.y && c.y < p.zm) }));
+  })().catch(() => { photoCache.delete(p.id); return null; }));
+  return photoCache.get(p.id);
+}
+async function showPhotos(p) {
+  const list = await loadPhotos(p);
+  const box = document.getElementById("photos");
+  if (!box || curPlace !== p || sheetMode !== "place") return;
+  if (!list || !list.length) { box.remove(); return; }  // brak zdjęć albo brak sieci: karta bez galerii
+  gallery = list;
+  box.removeAttribute("aria-busy");
+  box.innerHTML = `<div class="strip">${list.map((ph, k) => `<button type="button" class="ph" data-ph="${k}" aria-label="Powiększ zdjęcie ${k + 1}">
+    <img src="${esc(ph.src)}" width="${ph.w}" height="${ph.h}" alt="${esc(p.name)}, zdjęcie ${k + 1}" loading="lazy" decoding="async">${ph.y ? `<span class="yr${ph.stale ? " old" : ""}">${ph.y}</span>` : ""}</button>`).join("")}</div>
+    <p class="phsrc">${list.every(ph => ph.stale) ? `<b>Zdjęcia sprzed zmian obiektu w ${p.zm} r.</b> – aktualny wygląd sprawdź w Google Maps (link niżej). ` : ""}Zdjęcia z Wikimedia Commons, z rokiem wykonania. Stuknij, aby powiększyć i zobaczyć autora.</p>`;
+}
+
+const lb = document.getElementById("lightbox"), lbImg = document.getElementById("lbImg");
+let lbK = 0, touchX = null;
+function openLb(k) {
+  lbK = (k + gallery.length) % gallery.length;
+  const ph = gallery[lbK];
+  lbImg.src = ph.big;
+  lbImg.alt = (curPlace ? curPlace.name + ", " : "") + "zdjęcie " + (lbK + 1);
+  document.getElementById("lbCap").innerHTML = `${lbK + 1}/${gallery.length} · ${ph.y ? ph.y + " · " : ""}${esc(ph.author || "autor nieznany")}${ph.lic ? ", " + esc(ph.lic) : ""} · <a href="${esc(ph.page)}" target="_blank" rel="noopener">strona pliku</a>`;
+  document.getElementById("lbPrev").hidden = document.getElementById("lbNext").hidden = gallery.length < 2;
+  lb.hidden = false;
+}
+const closeLb = () => { lb.hidden = true; lbImg.removeAttribute("src"); };
+sheetBody.addEventListener("click", e => { const b = e.target.closest("[data-ph]"); if (b) openLb(+b.dataset.ph); });
+document.getElementById("lbClose").onclick = closeLb;
+document.getElementById("lbPrev").onclick = () => openLb(lbK - 1);
+document.getElementById("lbNext").onclick = () => openLb(lbK + 1);
+lb.addEventListener("click", e => { if (e.target === lb) closeLb(); });
+lb.addEventListener("touchstart", e => { touchX = e.touches[0].clientX; }, { passive: true });
+lb.addEventListener("touchend", e => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX; touchX = null;
+  if (Math.abs(dx) > 40 && gallery.length > 1) openLb(lbK + (dx < 0 ? 1 : -1));
+});
+document.addEventListener("keydown", e => {
+  if (lb.hidden) return;
+  if (e.key === "Escape") closeLb(); else if (e.key === "ArrowRight") openLb(lbK + 1); else if (e.key === "ArrowLeft") openLb(lbK - 1);
+});
+
+// ---------- odwiedzone ----------
+function vBtn(p) {
+  const d = V[p.id];
+  return `<button class="vbtn${d ? " on" : ""}" type="button" id="vToggle" data-v="${p.i}" aria-pressed="${!!d}">${
+    d ? `✓ Odwiedzone ${fmtDate(d)}` : "Oznacz jako odwiedzone"}</button>`;
+}
+function saveV() { store.set(VKEY, V); }
+function setVisited(p, on) {
+  if (on) V[p.id] = new Date().toISOString().slice(0, 10); else delete V[p.id];
+  saveV();
+  if (p.m) p.m.setStyle(ring(p));
+  if (F.v === "all") renderLabels(); else render();
+}
+sheetBody.addEventListener("click", e => {
+  const b = e.target.closest("#vToggle");
+  if (!b) return;
+  const p = P[+b.dataset.v];
+  setVisited(p, !isV(p));
+  b.outerHTML = vBtn(p);
+});
+
+// Kopia zapasowa: Safari i ikona na ekranie początkowym mają osobną pamięć, a iOS może ją wyczyścić
+const BACKUP_PREFIX = "MAPA-POLSKI-ODWIEDZONE ";
+async function exportV() {
+  const txt = BACKUP_PREFIX + JSON.stringify(V);
+  if (navigator.share) {
+    try { await navigator.share({ title: "Odwiedzone miejsca – kopia", text: txt }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  try { await navigator.clipboard.writeText(txt); toast("Kopia skopiowana do schowka. Wklej ją np. do Notatek."); }
+  catch (e) {
+    const box = document.getElementById("vImportBox"), ta = document.getElementById("vImportTxt");
+    box.hidden = false; ta.value = txt; ta.select();
+    toast("Zaznacz i skopiuj tekst kopii z pola poniżej.");
+  }
+}
+function importV(txt) {
+  let data;
+  try { data = JSON.parse(txt.trim().replace(BACKUP_PREFIX.trim(), "")); } catch (e) { data = null; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return toast("To nie jest poprawna kopia odwiedzonych miejsc.");
+  // nieznane identyfikatory też zachowujemy (mogą pasować do przyszłej wersji danych), ale ich nie liczymy
+  const known = new Set(P.map(p => p.id));
+  let added = 0;
+  for (const [k, d] of Object.entries(data)) {
+    if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !V[k]) { V[k] = d; if (known.has(k)) added++; }
+  }
+  saveV();
+  P.forEach(p => p.m && p.m.setStyle(ring(p)));
+  render();
+  sheetBody.innerHTML = filterHtml();
+  toast(`Wczytano ${added} ${plural(added, "nowe miejsce", "nowe miejsca", "nowych miejsc")}.`);
+}
+sheetBody.addEventListener("click", e => {
+  if (e.target.id === "vExport") exportV();
+  else if (e.target.id === "vImportShow") { const box = document.getElementById("vImportBox"); box.hidden = !box.hidden; }
+  else if (e.target.id === "vImport") importV(document.getElementById("vImportTxt").value);
+});
+
+// ---------- wyszukiwanie ----------
+const q = document.getElementById("q"), qclear = document.getElementById("qclear");
+q.addEventListener("input", () => {
+  const t = norm(q.value.trim());
+  qclear.hidden = !q.value;
+  if (t.length < 2) { if (sheetMode === "search") closeSheet(); return; }
+  const words = t.split(/\s+/);
+  const res = P.filter(p => words.every(w => p.key.includes(w)))
+    .sort((a, b) => (b.key.startsWith(words[0]) - a.key.startsWith(words[0])) || b.s - a.s || a.name.localeCompare(b.name, "pl"));
+  const shown = res.slice(0, 60);
+  openSheet("search", `Wyniki: ${res.length}`, res.length ? rows(shown, me) + (res.length > 60 ? `<p class="note">Pokazano 60 najlepszych. Doprecyzuj zapytanie.</p>` : "")
+    : `<p class="note">Brak miejsc pasujących do „${esc(q.value)}”.</p>`);
+});
+q.addEventListener("keydown", e => { if (e.key === "Enter") q.blur(); });
+qclear.onclick = () => { q.value = ""; qclear.hidden = true; if (sheetMode === "search") closeSheet(); };
+
+// ---------- lista miejsc na ekranie ----------
+document.getElementById("bList").onclick = () => {
+  const b = map.getBounds();
+  const vis = P.filter(p => pass(p) && b.contains([p.lat, p.lon]));
+  vis.sort((a, c) => c.s - a.s || (me ? km(me, a) - km(me, c) : a.name.localeCompare(c.name, "pl")));
+  const shown = vis.slice(0, 200);
+  openSheet("list", `Na ekranie: ${vis.length}`,
+    (vis.length ? rows(shown, me) : `<p class="note">Brak miejsc w tym widoku. Oddal mapę lub zmień filtry.</p>`) +
+    (vis.length > 200 ? `<p class="note">Pokazano 200 najwyżej ocenianych. Przybliż mapę, by zawęzić.</p>` : ""), true);
+};
+
+// ---------- filtry ----------
+const counts = (pred) => P.filter(pred).length;
+function progressHtml() {
+  const tot = [0, 0, 0, 0], v = [0, 0, 0, 0];
+  P.forEach(p => { tot[p.s]++; if (isV(p)) v[p.s]++; });
+  return `<p class="prog"><b>${v[0] + v[1] + v[2] + v[3]}</b> z ${P.length} miejsc<br>${
+    [3, 2, 1].map(s => `<span class="st">${stars(s)}</span> ${v[s]}/${tot[s]}`).join(" &nbsp;·&nbsp; ")}<br>Korona Gór Polski: ${
+    counts(p => p.kgp && isV(p))}/${counts(p => p.kgp)}</p>`;
+}
+function filterHtml() {
+  const seg = [["all", "Wszystkie"], ["yes", "Odwiedzone"], ["no", "Do odwiedzenia"]];
+  return `
+  <div class="fgroup"><h3 class="sub">Odwiedzone</h3>
+    ${progressHtml()}
+    <div class="seg" role="radiogroup" aria-label="Pokaż">${seg.map(([v, n]) =>
+      `<label><input type="radio" name="fv" data-f="v" value="${v}" ${F.v === v ? "checked" : ""}><span>${n}</span></label>`).join("")}</div>
+    <div class="row backup"><button class="btn" type="button" id="vExport">Zapisz kopię</button><button class="btn" type="button" id="vImportShow">Wczytaj kopię</button></div>
+    <div id="vImportBox" class="importbox" hidden>
+      <textarea id="vImportTxt" rows="3" placeholder="Wklej tekst kopii (zaczyna się od MAPA-POLSKI-ODWIEDZONE)"></textarea>
+      <button class="btn primary" type="button" id="vImport">Wczytaj</button>
+    </div>
+  </div>
+  <div class="fgroup"><h3 class="sub">Klasa (skala Touring Club Italiano)</h3><div class="toggles">
+    ${[3, 2, 1, 0].map(s => `<label class="tg"><input type="checkbox" data-f="s" data-v="${s}" ${F.s[s] ? "checked" : ""}>
+      <span class="st">${stars(s) || "–"}</span><span class="l">${STARS[s].n}</span><span class="c">${counts(p => p.s === s)}</span></label>`).join("")}
+  </div></div>
+  <div class="fgroup"><h3 class="sub">Wyróżnienia</h3><div class="toggles">
+    <label class="tg"><input type="checkbox" data-f="unesco" ${F.unesco ? "checked" : ""}><span class="l">Tylko lista UNESCO</span><span class="c">${counts(p => p.unesco)}</span></label>
+    <label class="tg"><input type="checkbox" data-f="ph" ${F.ph ? "checked" : ""}><span class="l">Tylko Pomniki Historii</span><span class="c">${counts(p => p.ph)}</span></label>
+    <label class="tg"><input type="checkbox" data-f="kgp" ${F.kgp ? "checked" : ""}><span class="l">Tylko Korona Gór Polski</span><span class="c">${counts(p => p.kgp)}</span></label>
+    <label class="tg"><input type="checkbox" data-f="hideClosed" ${F.hideClosed ? "checked" : ""}><span class="l">Ukryj czasowo nieczynne</span><span class="c">${counts(p => p.closed)}</span></label>
+  </div></div>
+  <div class="fgroup"><h3 class="sub">Rodzaj miejsca</h3><div class="toggles">
+    ${Object.entries(CATS).map(([k, c]) => `<label class="tg"><input type="checkbox" data-f="cat" data-v="${k}" ${F.cats.includes(k) ? "checked" : ""}>
+      <span class="dot" style="background:${c.c}"></span><span class="l">${c.n}</span><span class="c">${counts(p => p.cat === k)}</span></label>`).join("")}
+  </div></div>
+  <div class="row"><button class="btn" type="button" id="fAll">Pokaż wszystko</button><button class="btn" type="button" id="fTop">Tylko ★★★ i ★★</button></div>`;
+}
+function applyFilters() {
+  store.set("mtp-f", F);
+  const def = F.s.every(Boolean) && F.cats.length === Object.keys(CATS).length && !F.unesco && !F.ph && !F.kgp && !F.hideClosed && F.v === "all";
+  document.getElementById("fBadge").hidden = def;
+  document.getElementById("bFilter").classList.toggle("on", !def);
+  render();
+}
+document.getElementById("bFilter").onclick = () => {
+  if (sheetMode === "filters") return closeSheet();
+  openSheet("filters", "Filtry", filterHtml(), true);
+};
+sheetBody.addEventListener("change", e => {
+  const t = e.target, f = t.dataset.f;
+  if (!f) return;
+  if (f === "s") F.s[+t.dataset.v] = t.checked;
+  else if (f === "v") F.v = t.value;
+  else if (f === "cat") F.cats = t.checked ? [...new Set([...F.cats, t.dataset.v])] : F.cats.filter(c => c !== t.dataset.v);
+  else F[f] = t.checked;
+  applyFilters();
+});
+sheetBody.addEventListener("click", e => {
+  if (e.target.id === "fAll") F = JSON.parse(JSON.stringify(DEFAULT_F));
+  else if (e.target.id === "fTop") F = Object.assign(JSON.parse(JSON.stringify(DEFAULT_F)), { s: [false, false, true, true] });
+  else return;
+  applyFilters();
+  sheetBody.innerHTML = filterHtml();
+});
+
+// ---------- informacje ----------
+document.getElementById("bInfo").onclick = () => {
+  openSheet("info", "Legenda", `<div class="info">
+    <p>Miejsca ocenione według skali przewodników <b>Touring Club Italiano</b>: gwiazdki dostają zarówno miejscowości, jak i pojedyncze obiekty.</p>
+    <table class="scale">${[3, 2, 1, 0].map(s => `<tr><td><span class="st">${stars(s) || "–"}</span></td>
+      <td><b>${STARS[s].n}</b> <i style="color:var(--muted)">${STARS[s].it}</i><br><span class="note">${
+        ["lokalnie ciekawe, dla dociekliwych", "warte zobaczenia, gdy jest się w okolicy", "warte zboczenia z trasy", "warte podróży samo w sobie"][s]}</span></td>
+      <td>${counts(p => p.s === s)}</td></tr>`).join("")}</table>
+    <p>Przygaszona kropka z przerywanym obrysem oznacza miejsce <b>czasowo nieczynne</b> (remont, zamknięcie albo jeszcze przed otwarciem). Szczegóły są w karcie miejsca.</p>
+    <p>Sekcja <b>Warto zobaczyć</b> w karcie wymienia konkretne dzieła i elementy, na które warto zwrócić uwagę na miejscu. Gwiazdka przy pozycji oznacza dzieło wyjątkowej rangi, tak jak w przewodnikach TCI.</p>
+    <p>Na mapie oddalonej widać tylko ★★★ i ★★. Miejsca ★ pojawiają się po przybliżeniu, a bez gwiazdki przy jeszcze większym przybliżeniu.</p>
+    <p>Łącznie ${P.length} miejsc, w tym ${counts(p => p.unesco)} z listy UNESCO i ${counts(p => p.ph)} Pomników Historii.
+    Współrzędne pochodzą z artykułów polskiej Wikipedii, a w nielicznych przypadkach z OpenStreetMap. Oceny i opisy są redakcyjne.
+    Zdjęcia w kartach pochodzą z Wikimedia Commons: zdjęcie główne artykułu Wikipedii i pliki opisane jako przedstawiające to miejsce. Autor i licencja są podane po powiększeniu zdjęcia.</p>
+    <p><b>Odwiedzone:</b> w karcie miejsca stuknij „Oznacz jako odwiedzone”. Na mapie takie miejsce ma zielony pierścień.
+    Postęp, filtr i kopię zapasową znajdziesz w Filtrach.</p>
+    <p><b>Na iPhonie:</b> w Safari stuknij „Udostępnij”, potem „Do ekranu początkowego”. Mapa otworzy się jak aplikacja.
+    Safari i ikona na ekranie początkowym zapisują odwiedzone osobno, więc używaj jednego z nich albo przenieś kopię.</p>
+    <h3 class="sub">Kolory</h3>${Object.values(CATS).map(c => `<div class="meta" style="margin:5px 0"><span class="dot" style="background:${c.c}"></span>${c.n}</div>`).join("")}
+  </div>`, true);
+};
+
+// ---------- GPS ----------
+let me = null, meDot = null, meAcc = null, watchId = null;
+const toastEl = document.getElementById("toast");
+let toastT;
+function toast(msg) { toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => toastEl.hidden = true, 3500); }
+document.getElementById("bLocate").onclick = () => {
+  if (me) { map.flyTo([me.lat, me.lon], Math.max(map.getZoom(), 11)); return; }
+  if (!navigator.geolocation) return toast("Ta przeglądarka nie udostępnia lokalizacji.");
+  if (watchId !== null) return toast("Szukam Twojej pozycji…");
+  toast("Szukam Twojej pozycji…");
+  watchId = navigator.geolocation.watchPosition(pos => {
+    const first = !me;
+    me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+    const ll = [me.lat, me.lon];
+    if (!meDot) {
+      meAcc = L.circle(ll, { radius: pos.coords.accuracy, color: "#1a73e8", weight: 1, fillOpacity: .12, interactive: false }).addTo(map);
+      meDot = L.circleMarker(ll, { radius: 7, color: "#fff", weight: 3, fillColor: "#1a73e8", fillOpacity: 1, interactive: false }).addTo(map);
+    } else { meDot.setLatLng(ll); meAcc.setLatLng(ll).setRadius(pos.coords.accuracy); }
+    document.getElementById("bLocate").classList.add("on");
+    if (first) { toastEl.hidden = true; map.flyTo(ll, Math.max(map.getZoom(), 11)); }
+  }, err => {
+    watchId !== null && navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    toast(err.code === 1 ? "Brak zgody na lokalizację. Włącz ją w Ustawienia → Prywatność → Usługi lokalizacji → Safari." : "Nie udało się ustalić pozycji.");
+  }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+};
+
+applyFilters();
+</script>
+</body>
+</html>
